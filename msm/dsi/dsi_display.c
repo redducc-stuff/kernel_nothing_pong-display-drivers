@@ -53,6 +53,8 @@
 
 #define MDP_MAX 2
 
+struct dsi_display *primary_display;
+
 u8 dbgfs_tx_cmd_buf[SZ_4K];
 static char dsi_display_primary[MAX_CMDLINE_PARAM_LEN];
 static char dsi_display_secondary[MAX_CMDLINE_PARAM_LEN];
@@ -7987,6 +7989,7 @@ int dsi_display_get_modes(struct dsi_display *display,
 exit:
 	*out_modes = display->modes;
 	rc = 0;
+	primary_display = display;
 
 error:
 	if (rc) {
@@ -10195,6 +10198,10 @@ int dsi_display_ctl_post_transition(void *display)
 	dsi_clk_mgr_detach_framework(disp->clk_mngr, disp->ctrl->ctrl->disp_op);
 
 	return 0;
+}
+
+struct dsi_display *get_main_display(void) {
+	return primary_display;
 }
 
 void __init dsi_display_register(void)
