@@ -767,6 +767,7 @@ struct sde_crtc_state {
 	struct sde_cp_crtc_range_prop_payload
 		cp_range_payload[SDE_CP_CRTC_MAX_FEATURES];
 	bool cont_splash_populated;
+	bool fod_dim_valid;
 	struct sde_line_insertion_param line_insertion;
 	bool is_loopback_mode;
 	bool in_loopback_transition;
