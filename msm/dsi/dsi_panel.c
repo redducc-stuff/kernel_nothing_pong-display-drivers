@@ -62,6 +62,8 @@ static int isl97900_led_event(struct device_node *node, enum isl_function event,
 #define RSCC_MODE_THRESHOLD_TIME_US 40
 #define DCS_COMMAND_THRESHOLD_TIME_US 40
 
+struct dsi_panel *nt_panel = NULL;
+
 static void dsi_dce_prepare_pps_header(char *buf, u32 pps_delay_ms)
 {
 	char *bp;
@@ -467,13 +469,6 @@ int dsi_panel_power_on(struct dsi_panel *panel, bool is_cont_splash)
 {
 	int rc = 0;
 
-	rc = dsi_pwr_enable_regulator(&panel->power_info, true);
-	if (rc) {
-		DSI_ERR("[%s] failed to enable vregs, rc=%d\n",
-				panel->name, rc);
-		goto exit;
-	}
-
 	rc = dsi_panel_set_pinctrl_state(panel, true, is_cont_splash);
 	if (rc) {
 		DSI_ERR("[%s] failed to set pinctrl, rc=%d\n", panel->name, rc);
@@ -707,6 +702,8 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	u32 bl_lvl)
 {
 	int rc = 0;
+	int brightness;
+	int lp1_cmd_flag = DSI_CMD_SET_LP1;
 	unsigned long mode_flags = 0;
 	struct mipi_dsi_device *dsi = NULL;
 
@@ -719,6 +716,21 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	if (unlikely(panel->bl_config.lp_mode)) {
 		mode_flags = dsi->mode_flags;
 		dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+	}
+
+	if (panel->power_mode == SDE_MODE_DPMS_LP1 || panel->power_mode == SDE_MODE_DPMS_LP2) {
+		brightness = panel->bl_config.brightness;
+		if (brightness > 0 && brightness < 360) {
+			lp1_cmd_flag = DSI_CMD_SET_AOD_5NIT;
+		} else if (brightness >= 360 && brightness < 1300) {
+			lp1_cmd_flag = DSI_CMD_SET_AOD_30NIT;
+		} else if (brightness >= 1300) {
+			lp1_cmd_flag = DSI_CMD_SET_AOD_60NIT;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, lp1_cmd_flag, false);
+		if (rc)
+			DSI_ERR("[%s] failed to send DSI_CMD_SET_AOD cmd, rc=%d, lp1_cmd_flag = %d\n",
+			       panel->name, rc, lp1_cmd_flag);
 	}
 
 	if (panel->bl_config.bl_inverted_dbv)
@@ -798,7 +810,8 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	if (panel->host_config.ext_bridge_mode)
 		return 0;
 
-	DSI_DEBUG("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
+	DSI_WARN("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
+
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
 		rc = backlight_device_set_brightness(bl->raw_bd, bl_lvl);
@@ -2448,6 +2461,12 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,cmd-mode-switch-in-commands",
 	"qcom,cmd-mode-switch-out-commands",
 	"qcom,mdss-dsi-panel-status-command",
+	"qcom,mdss-dsi-aod-command-5nit",
+	"qcom,mdss-dsi-aod-command-30nit",
+	"qcom,mdss-dsi-aod-command-60nit",
+	"qcom,mdss-dsi-lp1-command-5nit",
+	"qcom,mdss-dsi-lp1-command-30nit",
+	"qcom,mdss-dsi-lp1-command-60nit",
 	"qcom,mdss-dsi-lp1-command",
 	"qcom,mdss-dsi-lp2-command",
 	"qcom,mdss-dsi-nolp-command",
@@ -2495,6 +2514,12 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,cmd-mode-switch-in-commands-state",
 	"qcom,cmd-mode-switch-out-commands-state",
 	"qcom,mdss-dsi-panel-status-command-state",
+	"qcom,mdss-dsi-aod-command-5nit-state",
+	"qcom,mdss-dsi-aod-command-30nit-state",
+	"qcom,mdss-dsi-aod-command-60nit-state",
+	"qcom,mdss-dsi-lp1-command-5nit-state",
+	"qcom,mdss-dsi-lp1-command-30nit-state",
+	"qcom,mdss-dsi-lp1-command-60nit-state",
 	"qcom,mdss-dsi-lp1-command-state",
 	"qcom,mdss-dsi-lp2-command-state",
 	"qcom,mdss-dsi-nolp-command-state",
@@ -3293,6 +3318,15 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 		panel->bl_config.bl_max_level = MAX_BL_LEVEL;
 	} else {
 		panel->bl_config.bl_max_level = val;
+	}
+
+	rc = utils->read_u32(utils->data, "qcom,mdss-dsi-bl-hbm-level", &val);
+	if (rc) {
+		DSI_DEBUG("[%s] bl-hbm-level unspecified, defaulting to hbm level\n",
+			 panel->name);
+		panel->bl_config.bl_hbm_level = HBM_BL_LEVEL;
+	} else {
+		panel->bl_config.bl_hbm_level = val;
 	}
 
 	rc = utils->read_u32(utils->data, "qcom,mdss-brightness-max-level",
@@ -4505,6 +4539,21 @@ static void dsi_panel_setup_vm_ops(struct dsi_panel *panel, bool trusted_vm_env)
 	}
 }
 
+int nt_is_panel_detected(void)
+{
+	int rc = 0;
+	if (nt_panel) {
+		if (!strcmp(nt_panel->name, "nt37705 amoled fhd+ 120hz cmd mode dsi visionox panel")) {
+			DSI_INFO("panel name detected\n");
+			rc = 1;
+		}
+	} else {
+		DSI_ERR("panel name is not detect\n");
+	}
+
+	return rc;
+}
+
 struct dsi_panel *dsi_panel_get(struct device *parent,
 				struct device_node *of_node,
 				struct device_node *parser_node,
@@ -4621,6 +4670,13 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	if (rc)
 		DSI_DEBUG("failed to get rgb led info, rc=%d\n", rc);
 
+	if (!strcmp(panel->name, "nt37705 amoled fhd+ 120hz cmd mode dsi visionox panel")) {
+		nt_panel = panel;
+		rc = nt_display_parse_switch_cmds(panel);
+		if (rc)
+			DSI_DEBUG("failed to parse switch cmds, rc=%d\n", rc);
+	}
+
 	rc = dsi_panel_vreg_get(panel);
 	if (rc) {
 		DSI_ERR("[%s] failed to get panel regulators, rc=%d\n",
@@ -4637,7 +4693,8 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		}
 	}
 
-	panel->power_mode = SDE_MODE_DPMS_OFF;
+	panel->power_mode = SDE_MODE_DPMS_ON;
+
 	drm_panel_init(&panel->drm_panel, &panel->mipi_device.dev,
 			NULL, DRM_MODE_CONNECTOR_DSI);
 	panel->mipi_device.dev.of_node = of_node;
@@ -5405,6 +5462,13 @@ int dsi_panel_pre_prepare(struct dsi_panel *panel)
 
 	mutex_lock(&panel->panel_lock);
 
+	rc = dsi_pwr_enable_regulator(&panel->power_info, true);
+	if (rc) {
+		DSI_ERR("[%s] failed to enable vregs, rc=%d\n",
+				panel->name, rc);
+		goto error;
+	}
+
 	/* If LP11_INIT is set, panel will be powered up during prepare() */
 	if (panel->lp11_init)
 		goto error;
@@ -5467,9 +5531,14 @@ error:
 	return rc;
 }
 
+
+extern int finger_hbm_flag;
+
 int dsi_panel_set_lp1(struct dsi_panel *panel)
 {
 	int rc = 0;
+	int brightness;
+	int lp1_cmd_flag = DSI_CMD_SET_LP1;
 
 	if (!panel) {
 		DSI_ERR("invalid params\n");
@@ -5492,11 +5561,24 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
 			"ibb", REGULATOR_MODE_IDLE);
 
+	brightness = panel->bl_config.brightness;
+	if (brightness > 0 && brightness < 360) {
+		lp1_cmd_flag = DSI_CMD_SET_LP1_5NIT;
+	} else if (brightness >= 360 && brightness < 1300) {
+		lp1_cmd_flag = DSI_CMD_SET_LP1_30NIT;
+	} else if (brightness >= 1300) {
+		lp1_cmd_flag = DSI_CMD_SET_LP1_60NIT;
+	}
+
 	if (panel->disp_op == MSM_DISP_OP_HWIO) {
-		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP1, false);
+		rc = dsi_panel_tx_cmd_set(panel, lp1_cmd_flag, false);
 		if (rc)
-			DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
-				panel->name, rc);
+			DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d, lp1_cmd_flag = %d\n",
+				panel->name, rc, lp1_cmd_flag);
+	}
+
+	if (finger_hbm_flag == 1) {
+		finger_hbm_flag = 0;
 	}
 
 exit:
@@ -5522,6 +5604,10 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 		if (rc)
 			DSI_ERR("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 				panel->name, rc);
+	}
+
+	if (finger_hbm_flag == 1) {
+		finger_hbm_flag = 0;
 	}
 
 exit:
@@ -6352,6 +6438,10 @@ int dsi_panel_disable(struct dsi_panel *panel)
 	}
 	panel->panel_initialized = false;
 	panel->power_mode = SDE_MODE_DPMS_OFF;
+
+	if (finger_hbm_flag == 1) {
+		finger_hbm_flag = 0;
+	}
 
 	mutex_unlock(&panel->panel_lock);
 	return rc;
