@@ -192,6 +192,7 @@ module_entry(
             "msm/dsi/dsi_display.c",
             "msm/dsi/dsi_display_manager.c",
             "msm/dsi/dsi_panel.c",
+            "msm/dsi/nt_display.c",
             "msm/dsi/dsi_clk_manager.c",
             "msm/dsi/dsi_display_test.c",
         ],

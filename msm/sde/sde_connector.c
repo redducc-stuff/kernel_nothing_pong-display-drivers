@@ -2860,11 +2860,12 @@ static int sde_connector_atomic_set_property(struct drm_connector *connector,
 		}
 		break;
 	case CONNECTOR_PROP_FINGER_FLAG:
-		SDE_ERROR_CONN(c_conn, "set finger flag: %d\n", val);
+		SDE_ERROR_CONN(c_conn, "set finger flag: %llu\n", val);
 		if (c_conn->finger_flag != val) {
 			c_conn->finger_flag = val;
 			c_conn->fingerlayer_dirty = true;
 		}
+		break;
 	default:
 		break;
 	}
@@ -3582,7 +3583,7 @@ ssize_t nt_tx_cmd(struct sde_connector *c_conn, const char *buf, size_t count)
 	int rc = 0, strtoint = 0;
 	u32 buf_size = 0;
 
-	sde_kms = _sde_connector_get_kms(&c_conn->base);
+	sde_kms = sde_connector_get_kms(&c_conn->base);
 	if (!sde_kms) {
 		SDE_ERROR("invalid kms\n");
 		return -EINVAL;
@@ -3723,7 +3724,7 @@ ssize_t nt_rx_cmd(struct sde_connector *c_conn, const char *buf, size_t count)
 
 	mutex_lock(&c_conn->lock);
 	c_conn->rx_len = c_conn->ops.cmd_receive(c_conn->display, buffer + 1,
-			buf_size - 1, c_conn->cmd_rx_buf, buffer[0]);
+			buf_size - 1, c_conn->cmd_rx_buf, buffer[0], NULL);
 	mutex_unlock(&c_conn->lock);
 
 	if (c_conn->rx_len <= 0)
@@ -4044,7 +4045,7 @@ static ssize_t store_skip_frame_mode(struct kobject *kobj,struct kobj_attribute 
 		return rc;
 
 	if (90 == nt_cur_refresh_rate || 60 == nt_cur_refresh_rate) {
-		SDE_ERROR("current refresh rate: %d, set to index %d failed\n", nt_cur_refresh_rate, refresh_rate_index);
+		SDE_ERROR("current refresh rate: %d, set to index %lu failed\n", nt_cur_refresh_rate, refresh_rate_index);
 		return -EINVAL;
 	}
 
@@ -4054,7 +4055,7 @@ static ssize_t store_skip_frame_mode(struct kobject *kobj,struct kobj_attribute 
 		return -EINVAL;
 	}
 
-	SDE_ERROR("set refresh rate, index: %d\n", refresh_rate_index);
+	SDE_ERROR("set refresh rate, index: %lu\n", refresh_rate_index);
 
 	return size;
 }
