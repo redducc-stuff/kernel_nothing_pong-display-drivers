@@ -24,7 +24,7 @@
 #include "sde/sde_hw_util.h"
 #include "hfi_dbg.h"
 
-#define DEFAULT_PANIC		1
+#define DEFAULT_PANIC		0
 #define DEFAULT_BASE_REG_CNT	DEFAULT_MDSS_HW_BLOCK_SIZE
 #define GROUP_BYTES		4
 #define ROW_BYTES		16
