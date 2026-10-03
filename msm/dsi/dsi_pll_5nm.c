@@ -842,7 +842,8 @@ static unsigned long dsi_pll_pclk_recalc_rate(struct clk_hw *hw,
 	if (pll->type == DSI_PHY_TYPE_DPHY) {
 		phy_post_div = dsi_pll_get_phy_post_div(pll);
 		pclk_rate = div_u64(vco_rate, phy_post_div);
-		pclk_rate = div_u64(pclk_rate, 2);
+		if (dsi_pll_get_dsiclk_sel(pll) == 1)
+			pclk_rate = div_u64(pclk_rate, 2);
 		pclk_div = dsi_pll_get_pclk_div(pll);
 		pclk_rate = div_u64(pclk_rate, pclk_div);
 	} else {
@@ -1128,6 +1129,19 @@ static int dsi_pll_5nm_set_byteclk_div(struct dsi_pll_resource *pll,
 	return 0;
 }
 
+/*
+ * 30bpp on 2/4 lanes needs the undivided dsiclk; halving it leaves no pixel
+ * rate the pixel RCG can reach and clk_set_rate() fails with -EINVAL.
+ */
+static int dsi_pll_calc_dsiclk_sel(struct dsi_pll_resource *pll)
+{
+	if (pll->bpp == 30 && (pll->lanes == 2 || pll->lanes == 4))
+		return 0;
+	if (pll->bpp == 3 && pll->lanes >= 3)
+		return 0;
+	return 1;
+}
+
 static int dsi_pll_calc_dphy_pclk_div(struct dsi_pll_resource *pll)
 {
 	u32 m_val, n_val; /* M and N values of MND trio */
@@ -1154,10 +1168,10 @@ static int dsi_pll_calc_dphy_pclk_div(struct dsi_pll_resource *pll)
 		n_val = 1;
 	}
 
-	/* Calculating pclk_div assuming dsiclk_sel to be 1 */
 	pclk_div = pll->bpp;
 	pclk_div = mult_frac(pclk_div, m_val, n_val);
-	do_div(pclk_div, 2);
+	if (dsi_pll_calc_dsiclk_sel(pll) == 1)
+		do_div(pclk_div, 2);
 	do_div(pclk_div, pll->lanes);
 
 	DSI_PLL_DBG(pll, "bpp: %d, lanes: %d, m_val: %u, n_val: %u, pclk_div: %u\n",
@@ -1235,10 +1249,11 @@ static int dsi_pll_5nm_set_pclk_div(struct dsi_pll_resource *pll, bool commit)
 	pll_post_div = dsi_pll_get_pll_post_div(pll);
 	pclk_src_rate = div_u64(pll->vco_rate, pll_post_div);
 	if (pll->type == DSI_PHY_TYPE_DPHY) {
-		dsiclk_sel = 0x1;
+		dsiclk_sel = dsi_pll_calc_dsiclk_sel(pll);
 		phy_post_div = dsi_pll_get_phy_post_div(pll);
 		pclk_src_rate = div_u64(pclk_src_rate, phy_post_div);
-		pclk_src_rate = div_u64(pclk_src_rate, 2);
+		if (dsiclk_sel == 1)
+			pclk_src_rate = div_u64(pclk_src_rate, 2);
 		pclk_div = dsi_pll_calc_dphy_pclk_div(pll);
 	} else {
 		dsiclk_sel = 0x3;
